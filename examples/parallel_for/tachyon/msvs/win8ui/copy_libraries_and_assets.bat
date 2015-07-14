@@ -31,18 +31,16 @@ if ("%2") == ("debug") set postfix=_debug
 set output_dir=%3
 if ("%4") == ("") set dat_file="%output_dir%\..\..\dat\balls.dat"
 
-:: Optional 4th parameter to set install root
-if ("%4") NEQ ("") set TBBROOT=%4
 :: Actually we can set install root by ourselves
 if ("%TBBROOT%") == ("") set TBBROOT=%~dp0..\..\..\..\..\
 
-:: Getting vs folders in case vc_mt binaries are not provided
 :: ordered from oldest to newest, so we end with newest available version
 if ("%VS110COMNTOOLS%") NEQ ("") set vc_dir=vc11_ui
 if ("%VS120COMNTOOLS%") NEQ ("") set vc_dir=vc12_ui
 echo Using %vc_dir% libraries
 
 if exist "%TBBROOT%\bin\%arch%\%vc_dir%\tbb%postfix%.dll" set interim_path=bin\%arch%
+if exist "%TBBROOT%..\redist\%arch%\tbb\%vc_dir%\tbb%postfix%.dll" set interim_path=..\redist\%arch%\tbb
 if exist "%TBBROOT%\lib\%arch%\%vc_dir%\tbb%postfix%.lib" set interim_lib_path=lib\%arch%
 if ("%interim_path%") == ("") goto error1
 if ("%interim_lib_path%") == ("") goto error1
@@ -70,4 +68,3 @@ exit /B 1
 
 :end
 exit /B 0
-

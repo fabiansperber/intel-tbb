@@ -61,10 +61,11 @@ static tbb::atomic<int> liveRegions;
 
 static void *getMallocMem(intptr_t /*pool_id*/, size_t &bytes)
 {
-    void *rawPtr = malloc(bytes+sizeof(MallocPoolHeader));
+    void *rawPtr = malloc(bytes+sizeof(MallocPoolHeader)+1);
     if (!rawPtr)
         return NULL;
-    void *ret = (void *)((uintptr_t)rawPtr+sizeof(MallocPoolHeader));
+    // +1 to check working with unaligned space
+    void *ret = (void *)((uintptr_t)rawPtr+sizeof(MallocPoolHeader)+1);
 
     MallocPoolHeader *hdr = (MallocPoolHeader*)ret-1;
     hdr->rawPtr = rawPtr;

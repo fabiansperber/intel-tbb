@@ -37,7 +37,7 @@
     #if __sun || __SUNPRO_CC
     #define __asm__ asm
     #endif
-
+    #include <unistd.h> // sysconf(_SC_PAGESIZE)
 #elif USE_WINTHREAD
     #define GetMyTID() GetCurrentThreadId()
 #if __TBB_WIN8UI_SUPPORT
@@ -537,16 +537,6 @@ const uint32_t numBlockBins = minFittingIndex+numFittingBins;
  * Objects of this size and larger are considered large objects.
  */
 const uint32_t minLargeObjectSize = fittingSize5 + 1;
-
-/*
- * Default granularity of memory pools
- */
-
-#if USE_WINTHREAD
-const size_t scalableMallocPoolGranularity = 64*1024; // for VirtualAlloc use
-#else
-const size_t scalableMallocPoolGranularity = 4*1024;  // page size, for mmap use
-#endif
 
 /*
  * Per-thread pool of slab blocks. Idea behind it is to not share with other
@@ -1900,8 +1890,8 @@ void MemoryPool::initDefaultPool()
     if (FILE *f = fopen("/proc/meminfo", "r")) {
         const int READ_BUF_SIZE = 100;
         char buf[READ_BUF_SIZE];
-        MALLOC_ASSERT(sizeof(hugePageSize) >= 8,
-                      "At least 64 bits required for keeping page size/numbers.");
+        MALLOC_STATIC_ASSERT(sizeof(hugePageSize) >= 8,
+              "At least 64 bits required for keeping page size/numbers.");
 
         while (fgets(buf, READ_BUF_SIZE, f)) {
             if (1 == sscanf(buf, "Hugepagesize: %llu kB", &hugePageSize)) {
@@ -1982,8 +1972,14 @@ static void initMemoryManager()
     MALLOC_ASSERT( 2*blockHeaderAlignment == sizeof(Block), ASSERT_TEXT );
     MALLOC_ASSERT( sizeof(FreeObject) == sizeof(void*), ASSERT_TEXT );
 
+#if USE_WINTHREAD
+    const size_t granularity = 64*1024; // granulatity of VirtualAlloc
+#else
+    // POSIX.1-2001-compliant way to get page size
+    const size_t granularity = sysconf(_SC_PAGESIZE);
+#endif
     bool initOk = defaultMemPool->
-        extMemPool.init(0, NULL, NULL, scalableMallocPoolGranularity,
+        extMemPool.init(0, NULL, NULL, granularity,
                         /*keepAllMemory=*/false, /*fixedPool=*/false);
 // TODO: add error handling, and on error do something better than exit(1)
     if (!initOk || !initBackRefMaster(&defaultMemPool->extMemPool.backend)) {
@@ -2338,6 +2334,12 @@ static void *reallocAligned(MemoryPool *memPool, void *ptr,
             return ptr;
         } else {
             copySize = lmb->objectSize;
+#if BACKEND_HAS_MREMAP
+            if ((result = (memPool->extMemPool.backend.remap(ptr, copySize, size,
+                              alignment<largeObjectAlignment?
+                                        largeObjectAlignment : alignment))))
+                return result;
+#endif
             result = alignment ? allocateAligned(memPool, size, alignment) :
                 internalPoolMalloc(memPool, size);
         }

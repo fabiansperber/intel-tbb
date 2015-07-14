@@ -2,6 +2,31 @@
 The list of most significant changes made over time in
 Intel(R) Threading Building Blocks (Intel(R) TBB).
 
+Intel TBB 4.3 Update 6
+TBB_INTERFACE_VERSION == 8006
+
+Changes (w.r.t. Intel TBB 4.3 Update 5):
+- Supported zero-copy realloc for objects >1MB under Linux* via
+    mremap system call.
+- C++11 move-aware insert and emplace methods have been added to
+    concurrent_hash_map container.
+- install_name is set to @rpath/<library name> on OS X*.
+
+Preview Features:
+- Added template class async_node to the flow graph API. It allows a
+    flow graph to communicate with an external activity managed by
+    the user or another runtime.
+- Improved speed of flow::graph::reset() clearing graph edges.
+    rf_extract flag has been renamed rf_clear_edges.
+- extract() method of graph nodes now takes no arguments.
+
+Bugs fixed:
+- concurrent_unordered_{set,map} behaves correctly for degenerate
+    hashes.
+- Fixed a race condition in the memory allocator that may lead to
+    excessive memory consumption under high multithreading load.
+
+------------------------------------------------------------------------
 Intel TBB 4.3 Update 5
 TBB_INTERFACE_VERSION == 8005
 
@@ -40,7 +65,7 @@ Changes (w.r.t. Intel TBB 4.3 Update 3):
 - Added documentation for tbb::flow::tagged_msg class and
     tbb::flow::output_port function.
 - Fixed build errors for systems that do not support dynamic linking.
-- C++11 move aware insert and emplace methods have been added to
+- C++11 move-aware insert and emplace methods have been added to
     concurrent unordered containers.
 
 Preview Features:
@@ -148,7 +173,7 @@ Changes (w.r.t. Intel TBB 4.2 Update 5):
 - C++11 move constructors and assignment operators have been added to
     concurrent_vector, concurrent_hash_map, concurrent_priority_queue,
     concurrent_unordered_{set,multiset,map,multimap}.
-- C++11 move aware emplace/push/pop methods have been added to
+- C++11 move-aware emplace/push/pop methods have been added to
     concurrent_vector, concurrent_queue, concurrent_bounded_queue,
     concurrent_priority_queue.
 - Methods to insert a C++11 initializer list have been added:
