@@ -153,27 +153,9 @@ struct arena_base : padded<intrusive_list_node> {
 #endif /* TBB_USE_ASSERT */
 }; // struct arena_base
 
-class arena
-#if (__GNUC__<4 || __GNUC__==4 && __GNUC_MINOR__==0) && !__INTEL_COMPILER
-    : public padded<arena_base>
-#else
-    : private padded<arena_base>
-#endif
+class arena: public padded<arena_base>
 {
-private:
-    friend class generic_scheduler;
-    template<typename SchedulerTraits> friend class custom_scheduler;
-    friend class governor;
-    friend class task_scheduler_observer_v3;
-    friend class market;
-    friend class tbb::task;
-    friend class tbb::task_group_context;
-    friend class allocate_root_with_context_proxy;
-    friend class intrusive_list<arena>;
-    friend class interface7::internal::task_arena_base; // declared in scheduler_common.h
-    friend class interface7::internal::delegated_task;
-    friend class interface7::internal::wait_task;
-
+public:
     typedef padded<arena_base> base_type;
 
     //! Constructor
@@ -189,16 +171,6 @@ private:
     static int allocation_size ( unsigned max_num_workers ) {
         return sizeof(base_type) + num_slots_to_reserve(max_num_workers) * (sizeof(mail_outbox) + sizeof(arena_slot));
     }
-
-#if __TBB_TASK_GROUP_CONTEXT
-    //! Finds all contexts affected by the state change and propagates the new state to them.
-    /** The propagation is relayed to the market because tasks created by one 
-        master thread can be passed to and executed by other masters. This means 
-        that context trees can span several arenas at once and thus state change
-        propagation cannot be generally localized to one arena only. **/
-    template <typename T>
-    bool propagate_task_group_state ( T task_group_context::*mptr_state, task_group_context& src, T new_state );
-#endif /* __TBB_TASK_GROUP_CONTEXT */
 
     //! Get reference to mailbox corresponding to given affinity_id.
     mail_outbox& mailbox( affinity_id id ) {
@@ -266,7 +238,6 @@ private:
     /** Must be the last data field */
     arena_slot my_slots[1];
 }; // class arena
-
 
 template<bool is_master>
 inline void arena::on_thread_leaving ( ) {

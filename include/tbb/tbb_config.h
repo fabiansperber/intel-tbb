@@ -238,7 +238,7 @@
 #define __TBB_CPP11_IS_COPY_CONSTRUCTIBLE_PRESENT   (__GXX_EXPERIMENTAL_CXX0X__ && __TBB_GCC_VERSION >= 40700 || __TBB_CPP11_TYPE_PROPERTIES_PRESENT)
 
 // In GCC and MSVC, implementation of std::move_if_noexcept is not aligned with noexcept
-#define __TBB_MOVE_IF_NOEXCEPT_PRESENT          (__GXX_EXPERIMENTAL_CXX0X__ && __TBB_GCC_VERSION >= 40700 || _MSC_VER >= 1800 || __clang__ && _LIBCPP_VERSION && __TBB_NOEXCEPT_PRESENT)
+#define __TBB_MOVE_IF_NOEXCEPT_PRESENT           (__GXX_EXPERIMENTAL_CXX0X__ && __TBB_GCC_VERSION >= 40700 || _MSC_VER >= 1900 || __clang__ && _LIBCPP_VERSION && __TBB_NOEXCEPT_PRESENT)
 //TODO: Probably more accurate way is to analyze version of stdlibc++ via__GLIBCXX__ instead of __TBB_GCC_VERSION
 #define __TBB_ALLOCATOR_TRAITS_PRESENT              (__cplusplus >= 201103L && _LIBCPP_VERSION  || _MSC_VER >= 1700 ||                                             \
                                                      __GXX_EXPERIMENTAL_CXX0X__ && __TBB_GCC_VERSION >= 40700 && !(__TBB_GCC_VERSION == 40700 && __TBB_DEFINE_MIC) \
@@ -266,7 +266,8 @@
 /* Actually ICC supports gcc __sync_* intrinsics starting 11.1,
  * but 64 bit support for 32 bit target comes in later ones*/
 /* TODO: change the version back to 4.1.2 once macro __TBB_WORD_SIZE become optional */
-#if __TBB_GCC_VERSION >= 40306 || __INTEL_COMPILER >= 1200
+/* Assumed that all clang versions have these gcc compatible intrinsics. */
+#if __TBB_GCC_VERSION >= 40306 || __INTEL_COMPILER >= 1200 || __clang__
     /** built-in atomics available in GCC since 4.1.2 **/
     #define __TBB_GCC_BUILTIN_ATOMICS_PRESENT 1
 #endif
@@ -547,7 +548,7 @@
     #define __TBB_SSE_STACK_ALIGNMENT_BROKEN 0
 #endif
 
-#if __GNUC__==4 && __GNUC_MINOR__==3 && __GNUC_PATCHLEVEL__==0
+#if __TBB_GCC_VERSION==40300 && !__INTEL_COMPILER && !__clang__
     /* GCC of this version may rashly ignore control dependencies */
     #define __TBB_GCC_OPTIMIZER_ORDERING_BROKEN 1
 #endif
@@ -666,8 +667,9 @@
 #define __TBB_ALLOCATOR_CONSTRUCT_VARIADIC      (__TBB_CPP11_VARIADIC_TEMPLATES_PRESENT && __TBB_CPP11_RVALUE_REF_PRESENT)
 
 #define __TBB_VARIADIC_PARALLEL_INVOKE          (TBB_PREVIEW_VARIADIC_PARALLEL_INVOKE && __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT && __TBB_CPP11_RVALUE_REF_PRESENT)
-#define __TBB_PREVIEW_COMPOSITE_NODE            (TBB_PREVIEW_FLOW_GRAPH_NODES && __TBB_CPP11_VARIADIC_TEMPLATES_PRESENT \
-                                                 && __TBB_CPP11_RVALUE_REF_PRESENT && __TBB_CPP11_AUTO_PRESENT) \
-                                                 && __TBB_CPP11_VARIADIC_TUPLE_PRESENT && !__TBB_UPCAST_OF_TUPLE_OF_REF_BROKEN
+#define __TBB_FLOW_GRAPH_CPP11_FEATURES         (__TBB_CPP11_VARIADIC_TEMPLATES_PRESENT \
+                                                && __TBB_CPP11_RVALUE_REF_PRESENT && __TBB_CPP11_AUTO_PRESENT) \
+                                                && __TBB_CPP11_VARIADIC_TUPLE_PRESENT && !__TBB_UPCAST_OF_TUPLE_OF_REF_BROKEN
 #define __TBB_PREVIEW_ASYNC_NODE TBB_PREVIEW_FLOW_GRAPH_NODES
+#define __TBB_PREVIEW_OPENCL_NODE              __TBB_FLOW_GRAPH_CPP11_FEATURES && TBB_PREVIEW_FLOW_GRAPH_NODES
 #endif /* __TBB_tbb_config_H */

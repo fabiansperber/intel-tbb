@@ -35,6 +35,33 @@
 namespace tbb {
 namespace internal {
 
+// put it here in order to enable compiler to inline it into arena::process and nested_arena_entry
+void generic_scheduler::attach_arena( arena* a, size_t index, bool is_master ) {
+    __TBB_ASSERT( a->my_market == my_market, NULL );
+    my_arena = a;
+    my_arena_index = index;
+    my_arena_slot = a->my_slots + index;
+    attach_mailbox( affinity_id(index+1) );
+#if __TBB_TASK_GROUP_CONTEXT
+    // Context to be used by root tasks by default (if the user has not specified one).
+    if( !is_master )
+        my_dummy_task->prefix().context = a->my_default_ctx;
+#endif /* __TBB_TASK_GROUP_CONTEXT */
+#if __TBB_TASK_PRIORITY
+    // In the current implementation master threads continue processing even when
+    // there are other masters with higher priority. Only TBB worker threads are
+    // redistributed between arenas based on the latters' priority. Thus master
+    // threads use arena's top priority as a reference point (in contrast to workers
+    // that use my_market->my_global_top_priority).
+    if( is_master ) {
+        my_ref_top_priority = &a->my_top_priority;
+        my_ref_reload_epoch = &a->my_reload_epoch;
+    }
+    my_local_reload_epoch = *my_ref_reload_epoch;
+    __TBB_ASSERT( !my_offloaded_tasks, NULL );
+#endif /* __TBB_TASK_PRIORITY */
+}
+
 void arena::process( generic_scheduler& s ) {
     __TBB_ASSERT( is_alive(my_guard), NULL );
     __TBB_ASSERT( governor::is_set(&s), NULL );
@@ -60,16 +87,7 @@ void arena::process( generic_scheduler& s ) {
         }
     }
     ITT_NOTIFY(sync_acquired, my_slots + index);
-    s.my_arena = this;
-    s.my_arena_index = index;
-    s.my_arena_slot = my_slots + index;
-#if __TBB_TASK_PRIORITY
-    s.my_local_reload_epoch = *s.my_ref_reload_epoch;
-    __TBB_ASSERT( !s.my_offloaded_tasks, NULL );
-#endif /* __TBB_TASK_PRIORITY */
-    s.attach_mailbox( affinity_id(index+1) );
-
-    s.my_arena_slot->hint_for_pop  = index; // initial value for round-robin
+    s.attach_arena( this, index, /*is_master*/false );
 
 #if !__TBB_FP_CONTEXT
     my_cpu_ctl_env.set_env();
@@ -167,15 +185,7 @@ arena::arena ( market& m, unsigned num_slots ) {
     my_task_stream.initialize(my_num_slots);
     ITT_SYNC_CREATE(&my_task_stream, SyncType_Scheduler, SyncObj_TaskStream);
     my_mandatory_concurrency = false;
-#if __TBB_TASK_GROUP_CONTEXT
-    // Context to be used by root tasks by default (if the user has not specified one).
-    // The arena's context should not capture fp settings for the sake of backward compatibility.
-    my_default_ctx =
-            new ( NFS_Allocate(1, sizeof(task_group_context), NULL) ) task_group_context(task_group_context::isolated, task_group_context::default_traits);
-#endif /* __TBB_TASK_GROUP_CONTEXT */
-#if __TBB_FP_CONTEXT
-    my_default_ctx->capture_fp_settings();
-#else
+#if !__TBB_FP_CONTEXT
     my_cpu_ctl_env.get_env();
 #endif
 }
@@ -366,16 +376,11 @@ bool arena::is_out_of_work() {
                         // Master thread's scheduler needs special handling as it
                         // may be destroyed at any moment (workers' schedulers are
                         // guaranteed to be alive while at least one thread is in arena).
-                        // Have to exclude concurrency with task group state change propagation too.
-                        // TODO: check whether it is still necessary since some pools belong to slots now
-                        my_market->my_arenas_list_mutex.lock();
-                        generic_scheduler *s = my_slots[0].my_scheduler;
-                        if ( s && as_atomic(my_slots[0].my_scheduler).compare_and_swap(LockedMaster, s) == s ) { //TODO: remove need to lock
-                            __TBB_ASSERT( my_slots[0].my_scheduler == LockedMaster && s != LockedMaster, NULL );
-                            work_absent = !may_have_tasks( s, tasks_present, dequeuing_possible );
-                            __TBB_store_with_release( my_slots[0].my_scheduler, s );
-                        }
-                        my_market->my_arenas_list_mutex.unlock();
+                        // The lock below excludes concurrency with task group state change
+                        // propagation and guarantees lifetime of the master thread.
+                        the_context_state_propagation_mutex.lock();
+                        work_absent = !may_have_tasks( my_slots[0].my_scheduler, tasks_present, dequeuing_possible );
+                        the_context_state_propagation_mutex.unlock();
                         // The following loop is subject to data races. While k-th slot's
                         // scheduler is being examined, corresponding worker can either
                         // leave to RML or migrate to another arena.
@@ -527,10 +532,12 @@ struct nested_arena_context : no_copy {
     ~nested_arena_context() {
         my_scheduler.nested_arena_exit(*this);
         (scheduler_state&)my_scheduler = my_orig_state; // restore arena settings
+        governor::assume_scheduler( &my_scheduler );
     }
 };
 
 void generic_scheduler::nested_arena_entry(arena* a, nested_arena_context& c, bool as_worker) {
+    __TBB_ASSERT( is_alive(a->my_guard), NULL );
     if( a == my_arena ) {
 #if __TBB_TASK_GROUP_CONTEXT
         c.my_orig_ptr = my_innermost_running_task =
@@ -538,26 +545,20 @@ void generic_scheduler::nested_arena_entry(arena* a, nested_arena_context& c, bo
 #endif
         return;
     }
-    __TBB_ASSERT( is_alive(a->my_guard), NULL );
     // overwrite arena settings
 #if __TBB_TASK_PRIORITY
     if ( my_offloaded_tasks )
         my_arena->orphan_offloaded_tasks( *this );
-    my_ref_top_priority = &a->my_top_priority;
-    my_ref_reload_epoch = &a->my_reload_epoch;
-    my_local_reload_epoch = a->my_reload_epoch;
+    my_offloaded_tasks = NULL;
 #endif /* __TBB_TASK_PRIORITY */
-    my_arena = a;
-    my_arena_index = 0;
-    my_arena_slot = my_arena->my_slots + my_arena_index;
-    my_inbox.detach(); // TODO: mailboxes were not designed for switching, add copy constructor?
-    attach_mailbox( affinity_id(my_arena_index+1) );
+    attach_arena( a, /*index*/0, /*is_master*/true );
     my_innermost_running_task = my_dispatching_task = as_worker? NULL : my_dummy_task;
 #if __TBB_TASK_GROUP_CONTEXT
     // save dummy's context and replace it by arena's context
     c.my_orig_ptr = my_dummy_task->prefix().context;
     my_dummy_task->prefix().context = a->my_default_ctx;
 #endif
+    governor::assume_scheduler( this );
 #if __TBB_ARENA_OBSERVER
     my_last_local_observer = 0; // TODO: try optimize number of calls
     my_arena->my_observers.notify_entry_observers( my_last_local_observer, /*worker=*/false );
@@ -585,12 +586,9 @@ void generic_scheduler::nested_arena_exit(nested_arena_context& c) {
     if ( my_offloaded_tasks )
         my_arena->orphan_offloaded_tasks( *this );
     my_local_reload_epoch = *c.my_orig_state.my_ref_reload_epoch;
-    while ( as_atomic(my_arena->my_slots[0].my_scheduler).compare_and_swap( NULL, this) != this )
-        __TBB_Yield(); // TODO: task priority can use master slot for locking while accessing the scheduler
-#else
+#endif
     // Free the master slot. TODO: support multiple masters
     __TBB_store_with_release(my_arena->my_slots[0].my_scheduler, (generic_scheduler*)NULL);
-#endif
     my_arena->my_exit_monitors.notify_all_relaxed(); // TODO: fix concurrent monitor to use notify_one (test MultipleMastersPart4 fails)
 #if __TBB_TASK_GROUP_CONTEXT
     // restore context of dummy task
@@ -626,21 +624,23 @@ void task_arena_base::internal_initialize( ) {
         my_max_concurrency = (int)governor::default_num_threads();
         default_concurrency_requested = true;
     }
-    arena* new_arena = &market::create_arena( my_max_concurrency + 1-my_master_slots/*it's +1 slot for num_masters=0*/,
+    arena* new_arena = market::create_arena( my_max_concurrency + 1-my_master_slots/*it's +1 slot for num_masters=0*/,
                                               global_control::active_value(global_control::thread_stack_size),
                                               default_concurrency_requested );
     // increases market's ref count for task_arena
-    market::global_market();
-    // TODO: reimplement in an efficient way. We need a scheduler instance in this thread
-    // but the scheduler is only required for task allocation and fifo random seeds until
-    // master wants to join the arena. (Idea - to create a restricted specialization)
-    // It is excessive to create an implicit arena for master here anyway. But scheduler
-    // instance implies master thread to be always connected with arena.
-    governor::local_scheduler();
-    //TODO: if( !governor::local_scheduler_if_initialized() ) generic_scheduler::create_master( the_dummy_arena )->my_auto_initialized = true;
+    market &m = market::global_market();
+    // allocate default context for task_arena
+#if __TBB_TASK_GROUP_CONTEXT
+    new_arena->my_default_ctx = new ( NFS_Allocate(1, sizeof(task_group_context), NULL) )
+            task_group_context( task_group_context::isolated, task_group_context::default_traits );
+#if __TBB_FP_CONTEXT
+    new_arena->my_default_ctx->capture_fp_settings();
+#endif
+#endif /* __TBB_TASK_GROUP_CONTEXT */
 
     if(as_atomic(my_arena).compare_and_swap(new_arena, NULL) != NULL) { // there is a race possible on my_initialized
         __TBB_ASSERT(my_arena, NULL);                             // other thread was the first
+        m.release(/*is_public*/true);
         new_arena->on_thread_leaving</*is_master*/true>(); // deallocate new arena
 #if __TBB_TASK_GROUP_CONTEXT
         spin_wait_while_eq(my_context, (task_group_context*)NULL);
@@ -649,6 +649,8 @@ void task_arena_base::internal_initialize( ) {
         as_atomic(my_context) = new_arena->my_default_ctx;
 #endif
     }
+    // TODO: should it trigger automatic initialization of this thread?
+    governor::local_scheduler_weak();
 }
 
 void task_arena_base::internal_terminate( ) {
@@ -734,7 +736,7 @@ public:
 
 void task_arena_base::internal_execute( internal::delegate_base& d) const {
     __TBB_ASSERT(my_arena, NULL);
-    generic_scheduler* s = governor::local_scheduler();
+    generic_scheduler* s = governor::local_scheduler_weak();
     __TBB_ASSERT(s, "Scheduler is not initialized");
     // TODO: is it safe to assign slot to a scheduler which is not yet switched?
     // TODO TEMP: one master, make more masters
@@ -821,7 +823,7 @@ public:
 
 void task_arena_base::internal_wait() const {
     __TBB_ASSERT(my_arena, NULL);
-    generic_scheduler* s = governor::local_scheduler();
+    generic_scheduler* s = governor::local_scheduler_weak();
     __TBB_ASSERT(s, "Scheduler is not initialized");
     __TBB_ASSERT(s->my_arena != my_arena || s->my_arena_index == 0, "task_arena::wait_until_empty() is not supported within a worker context" );
     if( s->my_arena == my_arena ) {
