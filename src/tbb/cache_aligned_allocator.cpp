@@ -180,23 +180,24 @@ size_t NFS_GetLineSize() {
 #endif
 
 void* NFS_Allocate( size_t n, size_t element_size, void* /*hint*/ ) {
-    size_t m = NFS_LineSize;
-    __TBB_ASSERT( m<=NFS_MaxLineSize, "illegal value for NFS_LineSize" );
-    __TBB_ASSERT( (m & (m-1))==0, "must be power of two" );
+    //TODO: make this functionality  available via an adaptor over generic STL like allocator
+    size_t cache_line_size = NFS_LineSize;
+    __TBB_ASSERT( cache_line_size <= NFS_MaxLineSize, "illegal value for NFS_LineSize" );
+    __TBB_ASSERT( is_power_of_two(cache_line_size), "must be power of two" );
     size_t bytes = n*element_size;
 
-    if (bytes<n || bytes+m<bytes) {
+    if (bytes<n || bytes+cache_line_size<bytes) {
         // Overflow
         throw_exception(eid_bad_alloc);
     }
     // scalable_aligned_malloc considers zero size request an error, and returns NULL
     if (bytes==0) bytes = 1;
     
-    void* result = (*padded_allocate_handler)( bytes, m );
+    void* result = (*padded_allocate_handler)( bytes, cache_line_size );
     if (!result)
         throw_exception(eid_bad_alloc);
 
-    __TBB_ASSERT( ((size_t)result&(m-1)) == 0, "The address returned isn't aligned to cache line size" );
+    __TBB_ASSERT( is_aligned(result, cache_line_size), "The address returned isn't aligned to cache line size" );
     return result;
 }
 

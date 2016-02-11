@@ -33,6 +33,7 @@
 #define _CRT_NONSTDC_NO_DEPRECATE 1
 #endif // _WIN32 || _WIN64
 
+#define _ISOC11_SOURCE 1 // to get C11 declarations for GLIBC
 #define HARNESS_NO_PARSE_COMMAND_LINE 1
 
 #include "tbb/tbb_config.h" // to get __TBB_WIN8UI_SUPPORT
@@ -58,6 +59,10 @@
 
 #define __TBB_POSIX_MEMALIGN_PRESENT (__linux__ && !__ANDROID__) || __APPLE__
 #define __TBB_PVALLOC_PRESENT __linux__ && !__ANDROID__
+#if __GLIBC__
+  // aligned_alloc available since GLIBC 2.16
+  #define __TBB_ALIGNED_ALLOC_PRESENT __GLIBC_PREREQ(2, 16)
+#endif // __GLIBC__
  // later Android doesn't have valloc or dlmalloc_usable_size
 #define __TBB_VALLOC_PRESENT (__linux__ && __ANDROID_API__<21) || __APPLE__
 #define __TBB_DLMALLOC_USABLE_SIZE_PRESENT  __ANDROID__ && __ANDROID_API__<21
@@ -144,6 +149,7 @@ public:
     static BackRefIdx newBackRef(bool largeObj);
 };
 
+class MemoryPool;
 class ExtMemoryPool;
 
 class BlockI {
@@ -151,6 +157,7 @@ class BlockI {
 };
 
 struct LargeMemoryBlock : public BlockI {
+    MemoryPool       *pool;          // owner pool
     LargeMemoryBlock *next,          // ptrs in list of cached blocks
                      *prev,
                      *gPrev,         // in pool's global list 
@@ -357,6 +364,9 @@ int TestMain() {
 #endif
 #if __linux__
     CheckMemalignFuncOverload(memalign, free);
+#if __TBB_ALIGNED_ALLOC_PRESENT
+    CheckMemalignFuncOverload(aligned_alloc, free);
+#endif
 
     struct mallinfo info = mallinfo();
     // right now mallinfo initialized by zero

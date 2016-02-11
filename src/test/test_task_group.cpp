@@ -845,7 +845,7 @@ int TestMain () {
         TestEh2();
         TestStructuredWait();
         TestStructuredCancellation2<true>();
-#if !__TBB_THROW_FROM_DTOR_BROKEN
+#if !(__TBB_THROW_FROM_DTOR_BROKEN || __TBB_STD_UNCAUGHT_EXCEPTION_BROKEN)
         TestStructuredCancellation2<false>();
 #else
         REPORT("Known issue: TestStructuredCancellation2<false>() is skipped.\n");

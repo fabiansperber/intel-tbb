@@ -112,8 +112,8 @@ void InitializeAndTerminate( int maxthread ) {
 typedef tbb::blocked_range<int> Range;
 
 Harness::SpinBarrier our_barrier;
-
-static tbb::enumerable_thread_specific<int> local_id, old_id, slot_id(-1);
+// slot_id value: -1 is reserved by current_slot(), -2 is set in on_scheduler_exit() below
+static tbb::enumerable_thread_specific<int> local_id, old_id, slot_id(-3);
 void ResetTLS() {
     local_id.clear();
     old_id.clear();
@@ -150,7 +150,7 @@ class ArenaObserver : public tbb::task_scheduler_observer {
                 &local_id.local(), myId, old_id.local());
         ASSERT(local_id.local() == myId, "nesting of arenas is broken");
         ASSERT(slot_id.local() == tbb::task_arena::current_thread_index(), NULL);
-        slot_id.local() = -1;
+        slot_id.local() = -2;
         local_id.local() = old_id.local();
         old_id.local() = 0;
     }

@@ -199,6 +199,8 @@ struct mallinfo mallinfo() __THROW
 // under Android.
 size_t dlmalloc_usable_size(const void *ptr) __attribute__ ((alias ("malloc_usable_size")));
 #else // __ANDROID__
+// C11 function, supported starting GLIBC 2.16
+void *aligned_alloc(size_t alignment, size_t size) __attribute__ ((alias ("memalign")));
 // Those non-standard functions are exported by GLIBC, and might be used
 // in conjunction with standard malloc/free, so we must ovberload them.
 // Bionic doesn't have them. Not removing from the linker scripts,
